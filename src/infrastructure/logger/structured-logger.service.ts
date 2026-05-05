@@ -2,11 +2,13 @@ import { Injectable, LoggerService } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { EnvironmentVariables } from '../../config/environment';
-import { LogLevel, StructuredLogEntry } from './structured-log-entry.type';
+import { AuditLogEntry, LogLevel, StructuredLogEntry } from './structured-log-entry.type';
 
 @Injectable()
 export class StructuredLoggerService implements LoggerService {
   constructor(private readonly config: ConfigService<EnvironmentVariables, true>) {}
+
+  // ─── Standard NestJS LoggerService interface ─────────────────────────────
 
   log(message: string, context?: string, metadata?: Record<string, unknown>): void {
     this.write('log', message, context, undefined, metadata);
@@ -26,16 +28,43 @@ export class StructuredLoggerService implements LoggerService {
   }
 
   debug(message: string, context?: string, metadata?: Record<string, unknown>): void {
-    if (this.shouldWriteDebugLogs()) {
+    if (this.isDebugEnabled()) {
       this.write('debug', message, context, undefined, metadata);
     }
   }
 
   verbose(message: string, context?: string, metadata?: Record<string, unknown>): void {
-    if (this.shouldWriteDebugLogs()) {
+    if (this.isDebugEnabled()) {
       this.write('verbose', message, context, undefined, metadata);
     }
   }
+
+  // ─── Audit-specific stream ───────────────────────────────────────────────
+
+  /**
+   * Writes a structured audit event to a dedicated stream (stdout with `audit` level).
+   * In production, ship this stream separately to a compliance sink (ELK, CloudWatch, etc.).
+   */
+  audit(
+    action: string,
+    actorId: string | null,
+    entityType: string,
+    entityId: string | null,
+    metadata?: Record<string, unknown>,
+  ): void {
+    const entry: AuditLogEntry = {
+      timestamp: new Date().toISOString(),
+      actorId,
+      action,
+      entityType,
+      entityId,
+      metadata,
+    };
+
+    process.stdout.write(`${JSON.stringify({ level: 'audit', ...entry })}\n`);
+  }
+
+  // ─── Private helpers ─────────────────────────────────────────────────────
 
   private write(
     level: LogLevel,
@@ -52,6 +81,7 @@ export class StructuredLoggerService implements LoggerService {
       trace,
       metadata,
     };
+
     const output = JSON.stringify(entry);
 
     if (level === 'error') {
@@ -62,9 +92,9 @@ export class StructuredLoggerService implements LoggerService {
     process.stdout.write(`${output}\n`);
   }
 
-  private shouldWriteDebugLogs(): boolean {
-    const logLevel = this.config.get('LOG_LEVEL', { infer: true });
+  private isDebugEnabled(): boolean {
+    const level = this.config.get('LOG_LEVEL', { infer: true });
 
-    return logLevel === 'debug' || logLevel === 'trace';
+    return level === 'debug' || level === 'trace';
   }
 }

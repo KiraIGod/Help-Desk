@@ -3,6 +3,7 @@ import { randomUUID } from 'crypto';
 
 import {
   CreateTicketInput,
+  PaginatedTickets,
   TicketFilters,
   TicketRepository,
   UpdateTicketInput,
@@ -34,11 +35,18 @@ export class InMemoryTicketRepository implements TicketRepository {
     return ticket;
   }
 
-  async findAll(filters: TicketFilters): Promise<Ticket[]> {
-    return [...this.tickets.values()]
+  async findAll(filters: TicketFilters): Promise<PaginatedTickets> {
+    const page = filters.page ?? 1;
+    const limit = filters.limit ?? 20;
+    const matched = [...this.tickets.values()]
       .filter((ticket) => !ticket.deletedAt)
       .filter((ticket) => this.matchesFilters(ticket, filters))
       .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
+
+    const total = matched.length;
+    const data = matched.slice((page - 1) * limit, page * limit);
+
+    return { data, total, page, limit };
   }
 
   async findById(id: string): Promise<Ticket | null> {

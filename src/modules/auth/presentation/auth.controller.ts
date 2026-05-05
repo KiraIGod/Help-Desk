@@ -1,4 +1,5 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Post, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 
 import { CurrentUser } from '../../../common/decorators/current-user.decorator';
 import { LoginDto } from '../application/dto/login.dto';
@@ -8,6 +9,12 @@ import { AuthService } from '../application/services/auth.service';
 import { AuthenticatedUser } from '../domain/types/authenticated-user.type';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
+/**
+ * Auth endpoints use a stricter throttle window:
+ *   - 10 requests / 60 s per IP (overrides the default 100/60s)
+ * This mitigates brute-force and credential-stuffing attacks.
+ */
+@Throttle({ auth: { ttl: 60, limit: 10 } })
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}

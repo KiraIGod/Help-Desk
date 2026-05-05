@@ -2,23 +2,27 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
+import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { EnvironmentVariables } from '../../config/environment';
-import { AuthService } from './application/services/auth.service';
+import { RefreshTokenOrmEntity } from './infrastructure/persistence/typeorm/refresh-token.orm-entity';
+import { UserOrmEntity } from '../users/infrastructure/persistence/typeorm/user.orm-entity';
+import { TypeOrmRefreshTokenRepository } from './infrastructure/persistence/typeorm-refresh-token.repository';
+import { TypeOrmUserAuthRepository } from './infrastructure/persistence/typeorm-user-auth.repository';
+import { JwtAccessStrategy } from './infrastructure/strategies/jwt-access.strategy';
 import {
   REFRESH_TOKEN_REPOSITORY,
   USER_AUTH_REPOSITORY,
 } from './application/ports/auth-repository.tokens';
-import { InMemoryRefreshTokenRepository } from './infrastructure/persistence/in-memory-refresh-token.repository';
-import { InMemoryUserAuthRepository } from './infrastructure/persistence/in-memory-user-auth.repository';
-import { JwtAccessStrategy } from './infrastructure/strategies/jwt-access.strategy';
-import { AuthController } from './presentation/auth.controller';
+import { AuthService } from './application/services/auth.service';
 import { JwtAuthGuard } from './presentation/guards/jwt-auth.guard';
+import { AuthController } from './presentation/auth.controller';
 
 @Module({
   imports: [
     ConfigModule,
     PassportModule,
+    TypeOrmModule.forFeature([UserOrmEntity, RefreshTokenOrmEntity]),
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService<EnvironmentVariables, true>) => ({
@@ -33,11 +37,11 @@ import { JwtAuthGuard } from './presentation/guards/jwt-auth.guard';
     JwtAuthGuard,
     {
       provide: USER_AUTH_REPOSITORY,
-      useClass: InMemoryUserAuthRepository,
+      useClass: TypeOrmUserAuthRepository,
     },
     {
       provide: REFRESH_TOKEN_REPOSITORY,
-      useClass: InMemoryRefreshTokenRepository,
+      useClass: TypeOrmRefreshTokenRepository,
     },
   ],
   exports: [AuthService, JwtAuthGuard],

@@ -25,11 +25,20 @@ export interface TicketFilters {
   deadlineFrom?: Date;
   deadlineTo?: Date;
   search?: string;
+  page?: number;
+  limit?: number;
+}
+
+export interface PaginatedTickets {
+  data: Ticket[];
+  total: number;
+  page: number;
+  limit: number;
 }
 
 export interface TicketRepository {
   create(input: CreateTicketInput): Promise<Ticket>;
-  findAll(filters: TicketFilters): Promise<Ticket[]>;
+  findAll(filters: TicketFilters): Promise<PaginatedTickets>;
   findById(id: string): Promise<Ticket | null>;
   update(id: string, input: UpdateTicketInput): Promise<Ticket | null>;
   assignExecutor(id: string, executorId: string): Promise<Ticket | null>;

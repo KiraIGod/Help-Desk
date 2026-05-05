@@ -1,6 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 
-import { StructuredLoggerService } from '../../../../infrastructure/logging/structured-logger.service';
+import { StructuredLoggerService } from '../../../../infrastructure/logger/structured-logger.service';
 import { CreateAuditLogDto } from '../dto/create-audit-log.dto';
 import { AuditLogResponseDto, toAuditLogResponse } from '../dto/audit-log-response.dto';
 import { AuditLogRepository } from '../ports/audit-log-repository.port';

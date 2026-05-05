@@ -17,6 +17,16 @@ export interface TicketResponseDto {
   updatedAt: Date;
 }
 
+export interface PaginatedTicketResponseDto {
+  data: TicketResponseDto[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
+
 export const toTicketResponse = (ticket: Ticket): TicketResponseDto => ({
   id: ticket.id,
   title: ticket.title,
