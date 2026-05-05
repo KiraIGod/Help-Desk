@@ -1,28 +1,24 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { randomUUID } from 'crypto';
-import { DataSource } from 'typeorm';
 
+import { TRANSACTION_SERVICE, TransactionService } from '../../../../common/transaction/transaction.service';
 import { AuditAction } from '../../../audit/domain/enums/audit-action.enum';
-import { AuditLogOrmEntity } from '../../../audit/infrastructure/persistence/typeorm/audit-log.orm-entity';
 import { AuthenticatedUser } from '../../../auth/domain/types/authenticated-user.type';
 import { QueueService } from '../../../../infrastructure/queue/queue.service';
 import { RedisService } from '../../../../infrastructure/redis/redis.service';
 import { TICKET_LIST_KEY_PREFIX } from '../../../../infrastructure/redis/redis.constants';
-import { TicketOrmEntity } from '../../infrastructure/persistence/typeorm/ticket.orm-entity';
+import { StructuredLoggerService } from '../../../../infrastructure/logger/structured-logger.service';
 import { AssignExecutorDto } from '../dto/assign-executor.dto';
 import { TicketResponseDto, toTicketResponse } from '../dto/ticket-response.dto';
-import { TicketRepository } from '../ports/ticket-repository.port';
-import { TICKET_REPOSITORY } from '../ports/ticket-repository.token';
 import { ticketCacheKey } from './ticket-cache.util';
 
 @Injectable()
 export class AssignTicketUseCase {
   constructor(
-    @Inject(TICKET_REPOSITORY)
-    private readonly tickets: TicketRepository,
-    private readonly dataSource: DataSource,
+    @Inject(TRANSACTION_SERVICE)
+    private readonly tx: TransactionService,
     private readonly queue: QueueService,
     private readonly redis: RedisService,
+    private readonly logger: StructuredLoggerService,
   ) {}
 
   async execute(
@@ -30,53 +26,50 @@ export class AssignTicketUseCase {
     dto: AssignExecutorDto,
     actor: AuthenticatedUser,
   ): Promise<TicketResponseDto> {
-    const existing = await this.tickets.findById(ticketId);
+    const ticket = await this.tx.execute(async (ctx) => {
+      const existing = await ctx.tickets.findByIdForUpdate(ticketId);
 
-    if (!existing) {
-      throw new NotFoundException('Ticket not found');
-    }
+      if (!existing) {
+        throw new NotFoundException('Ticket not found');
+      }
 
-    const now = new Date();
-    const newStatus = existing.status === 'open' ? 'in_progress' : existing.status;
+      const updated = existing.assignExecutor(dto.executorId);
+      const saved = await ctx.tickets.save(updated);
 
-    await this.dataSource.transaction(async (manager) => {
-      await manager.getRepository(TicketOrmEntity).update(ticketId, {
-        executorId: dto.executorId,
-        status: newStatus,
-        updatedAt: now,
+      await ctx.auditLogs.save({
+        actorId: actor.id,
+        action: AuditAction.ASSIGN_TICKET,
+        entityType: 'ticket',
+        entityId: ticketId,
+        metadata: {
+          executorId: dto.executorId,
+          previousExecutorId: existing.executorId,
+          statusTransition: existing.status !== updated.status
+            ? { from: existing.status, to: updated.status }
+            : null,
+        },
       });
 
-      await manager.getRepository(AuditLogOrmEntity).save(
-        manager.getRepository(AuditLogOrmEntity).create({
-          id: randomUUID(),
-          actorId: actor.id,
-          action: AuditAction.ASSIGN_TICKET,
-          entityType: 'ticket',
-          entityId: ticketId,
-          metadata: {
-            executorId: dto.executorId,
-            previousExecutorId: existing.executorId,
-            statusTransition: existing.status !== newStatus
-              ? { from: existing.status, to: newStatus }
-              : null,
-          },
-          createdAt: now,
-        }),
-      );
+      return saved;
     });
 
-    const updated = await this.tickets.findById(ticketId);
-    const response = toTicketResponse(updated!);
+    const response = toTicketResponse(ticket);
 
-    await Promise.all([
-      this.redis.set(ticketCacheKey(ticketId), response),
-      this.redis.invalidateByPattern(`${TICKET_LIST_KEY_PREFIX}:*`),
+    await Promise.allSettled([
+      this.redis.set(ticketCacheKey(ticketId), response).catch((err) => {
+        this.logger.warn('cache_set_failed', 'AssignTicketUseCase', { key: ticketCacheKey(ticketId), error: err?.message });
+      }),
+      this.redis.invalidateByPattern(`${TICKET_LIST_KEY_PREFIX}:*`).catch((err) => {
+        this.logger.warn('cache_invalidate_failed', 'AssignTicketUseCase', { error: err?.message });
+      }),
       this.queue.sendEmail({
         type: 'ticket_assigned',
         recipientUserId: dto.executorId,
         ticketId,
-        subject: `Ticket assigned: ${updated!.title}`,
-        body: updated!.description,
+        subject: `Ticket assigned: ${ticket.title}`,
+        body: ticket.description,
+      }).catch((err) => {
+        this.logger.error('email_queue_failed', undefined, 'AssignTicketUseCase', { ticketId, error: (err as Error)?.message });
       }),
     ]);
 

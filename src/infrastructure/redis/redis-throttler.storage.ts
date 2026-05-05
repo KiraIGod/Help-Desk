@@ -11,13 +11,6 @@ interface ThrottlerStorageRecord {
   timeToBlockExpire: number;
 }
 
-/**
- * Redis-backed throttler storage.
- *
- * Keys follow the pattern:
- *   throttler:{throttlerName}:{tracker}     – hit counter
- *   throttler:block:{throttlerName}:{tracker} – block marker
- */
 @Injectable()
 export class RedisThrottlerStorage implements ThrottlerStorage {
   constructor(

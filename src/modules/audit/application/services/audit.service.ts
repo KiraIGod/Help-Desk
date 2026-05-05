@@ -15,7 +15,7 @@ export class AuditService {
   ) {}
 
   async record(input: CreateAuditLogDto): Promise<AuditLogResponseDto> {
-    const auditLog = await this.auditLogs.create(input);
+    const auditLog = await this.auditLogs.save(input);
 
     this.logger.log('audit_log_recorded', 'AuditService', {
       auditLogId: auditLog.id,

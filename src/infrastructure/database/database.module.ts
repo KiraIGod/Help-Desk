@@ -16,7 +16,7 @@ import { TicketOrmEntity } from '../../modules/tickets/infrastructure/persistenc
         type: 'postgres',
         url: config.get('DATABASE_URL', { infer: true }),
         entities: [UserOrmEntity, TicketOrmEntity, AuditLogOrmEntity, RefreshTokenOrmEntity],
-        synchronize: config.get('NODE_ENV', { infer: true }) !== 'production',
+        synchronize: false,
         ssl:
           config.get('NODE_ENV', { infer: true }) === 'production'
             ? { rejectUnauthorized: false }

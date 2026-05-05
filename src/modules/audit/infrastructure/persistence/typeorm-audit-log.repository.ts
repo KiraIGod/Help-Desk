@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { randomUUID } from 'crypto';
-import { EntityManager, Repository } from 'typeorm';
+import { Repository } from 'typeorm';
 
 import { CreateAuditLogDto } from '../../application/dto/create-audit-log.dto';
 import { AuditLogRepository } from '../../application/ports/audit-log-repository.port';
@@ -15,18 +15,17 @@ export class TypeOrmAuditLogRepository implements AuditLogRepository {
     private readonly repo: Repository<AuditLogOrmEntity>,
   ) {}
 
-  async create(input: CreateAuditLogDto, manager?: EntityManager): Promise<AuditLog> {
-    const data = {
-      id: randomUUID(),
-      actorId: input.actorId ?? null,
-      action: input.action,
-      entityType: input.entityType,
-      entityId: input.entityId ?? null,
-      metadata: input.metadata ?? {},
-    };
-
-    const repo = manager ? manager.getRepository(AuditLogOrmEntity) : this.repo;
-    const saved = await repo.save(repo.create(data));
+  async save(input: CreateAuditLogDto): Promise<AuditLog> {
+    const saved = await this.repo.save(
+      this.repo.create({
+        id: randomUUID(),
+        actorId: input.actorId ?? null,
+        action: input.action,
+        entityType: input.entityType,
+        entityId: input.entityId ?? null,
+        metadata: input.metadata ?? {},
+      }),
+    );
 
     return this.toDomain(saved);
   }

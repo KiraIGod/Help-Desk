@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import IORedis from 'ioredis';
 
 import { EnvironmentVariables } from '../../config/environment';
+import { StructuredLoggerService } from '../logger/structured-logger.service';
 import { REDIS_CLIENT } from './redis.constants';
 
 @Injectable()
@@ -11,6 +12,7 @@ export class RedisService implements OnModuleDestroy {
     @Inject(REDIS_CLIENT)
     private readonly redis: IORedis,
     private readonly config: ConfigService<EnvironmentVariables, true>,
+    private readonly logger: StructuredLoggerService,
   ) {}
 
   async get<T>(key: string): Promise<T | null> {
@@ -20,7 +22,13 @@ export class RedisService implements OnModuleDestroy {
       return null;
     }
 
-    return JSON.parse(value) as T;
+    try {
+      return JSON.parse(value) as T;
+    } catch {
+      this.logger.warn('redis_json_parse_failed', 'RedisService', { key });
+
+      return null;
+    }
   }
 
   async set<T>(key: string, value: T, ttlSeconds?: number): Promise<void> {
@@ -38,12 +46,6 @@ export class RedisService implements OnModuleDestroy {
     await this.redis.del(...keys);
   }
 
-  /**
-   * Deletes all keys matching a given glob pattern.
-   * Uses SCAN to avoid blocking the event loop on large keyspaces.
-   *
-   * Example: invalidateByPattern('tickets:list:*')
-   */
   async invalidateByPattern(pattern: string): Promise<void> {
     let cursor = '0';
 
@@ -64,9 +66,6 @@ export class RedisService implements OnModuleDestroy {
     } while (cursor !== '0');
   }
 
-  /**
-   * Atomic increment – useful for rate-limiting counters or cache versioning.
-   */
   async increment(key: string, ttlSeconds?: number): Promise<number> {
     const pipeline = this.redis.pipeline();
 
@@ -78,8 +77,11 @@ export class RedisService implements OnModuleDestroy {
 
     const results = await pipeline.exec();
 
-    // results[0] = [error, value] of INCR
     return (results?.[0]?.[1] as number) ?? 0;
+  }
+
+  async ping(): Promise<void> {
+    await this.redis.ping();
   }
 
   async onModuleDestroy(): Promise<void> {

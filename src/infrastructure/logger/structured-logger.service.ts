@@ -8,8 +8,6 @@ import { AuditLogEntry, LogLevel, StructuredLogEntry } from './structured-log-en
 export class StructuredLoggerService implements LoggerService {
   constructor(private readonly config: ConfigService<EnvironmentVariables, true>) {}
 
-  // ─── Standard NestJS LoggerService interface ─────────────────────────────
-
   log(message: string, context?: string, metadata?: Record<string, unknown>): void {
     this.write('log', message, context, undefined, metadata);
   }
@@ -39,12 +37,6 @@ export class StructuredLoggerService implements LoggerService {
     }
   }
 
-  // ─── Audit-specific stream ───────────────────────────────────────────────
-
-  /**
-   * Writes a structured audit event to a dedicated stream (stdout with `audit` level).
-   * In production, ship this stream separately to a compliance sink (ELK, CloudWatch, etc.).
-   */
   audit(
     action: string,
     actorId: string | null,
@@ -63,8 +55,6 @@ export class StructuredLoggerService implements LoggerService {
 
     process.stdout.write(`${JSON.stringify({ level: 'audit', ...entry })}\n`);
   }
-
-  // ─── Private helpers ─────────────────────────────────────────────────────
 
   private write(
     level: LogLevel,

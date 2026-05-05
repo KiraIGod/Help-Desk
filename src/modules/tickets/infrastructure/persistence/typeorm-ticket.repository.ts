@@ -1,17 +1,13 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { randomUUID } from 'crypto';
 import { Brackets, Repository } from 'typeorm';
 
 import {
-  CreateTicketInput,
   PaginatedTickets,
   TicketFilters,
   TicketRepository,
-  UpdateTicketInput,
 } from '../../application/ports/ticket-repository.port';
 import { Ticket } from '../../domain/entities/ticket.entity';
-import { TicketStatus } from '../../domain/value-objects/ticket-status';
 import { TicketOrmEntity } from './typeorm/ticket.orm-entity';
 
 @Injectable()
@@ -21,23 +17,22 @@ export class TypeOrmTicketRepository implements TicketRepository {
     private readonly repo: Repository<TicketOrmEntity>,
   ) {}
 
-  async create(input: CreateTicketInput): Promise<Ticket> {
-    const entity = this.repo.create({
-      id: randomUUID(),
-      title: input.title,
-      description: input.description,
-      requesterId: input.requesterId,
-      executorId: null,
-      status: 'open',
-      priority: input.priority,
-      deadlineAt: input.deadlineAt ?? null,
-      resolvedAt: null,
-      closedAt: null,
+  async save(ticket: Ticket): Promise<Ticket> {
+    const result = await this.repo.save({
+      id: ticket.id,
+      title: ticket.title,
+      description: ticket.description,
+      requesterId: ticket.requesterId,
+      executorId: ticket.executorId,
+      status: ticket.status,
+      priority: ticket.priority,
+      deadlineAt: ticket.deadlineAt,
+      resolvedAt: ticket.resolvedAt,
+      closedAt: ticket.closedAt,
+      createdAt: ticket.createdAt,
     });
 
-    const saved = await this.repo.save(entity);
-
-    return this.toDomain(saved);
+    return this.toDomain(result);
   }
 
   async findAll(filters: TicketFilters): Promise<PaginatedTickets> {
@@ -103,64 +98,13 @@ export class TypeOrmTicketRepository implements TicketRepository {
     return entity ? this.toDomain(entity) : null;
   }
 
-  async update(id: string, input: UpdateTicketInput): Promise<Ticket | null> {
-    const entity = await this.repo.findOne({ where: { id } });
-
-    if (!entity) {
-      return null;
-    }
-
-    Object.assign(entity, {
-      title: input.title ?? entity.title,
-      description: input.description ?? entity.description,
-      priority: input.priority ?? entity.priority,
-      deadlineAt: input.deadlineAt === undefined ? entity.deadlineAt : input.deadlineAt,
+  async findByIdForUpdate(id: string): Promise<Ticket | null> {
+    const entity = await this.repo.findOne({
+      where: { id },
+      lock: { mode: 'pessimistic_write' },
     });
 
-    const saved = await this.repo.save(entity);
-
-    return this.toDomain(saved);
-  }
-
-  async assignExecutor(id: string, executorId: string): Promise<Ticket | null> {
-    const entity = await this.repo.findOne({ where: { id } });
-
-    if (!entity) {
-      return null;
-    }
-
-    entity.executorId = executorId;
-
-    if (entity.status === 'open') {
-      entity.status = 'in_progress';
-    }
-
-    const saved = await this.repo.save(entity);
-
-    return this.toDomain(saved);
-  }
-
-  async updateStatus(id: string, status: TicketStatus): Promise<Ticket | null> {
-    const entity = await this.repo.findOne({ where: { id } });
-
-    if (!entity) {
-      return null;
-    }
-
-    const now = new Date();
-
-    entity.status = status;
-
-    if (status === 'resolved') {
-      entity.resolvedAt = now;
-      entity.closedAt = null;
-    } else if (status === 'closed') {
-      entity.closedAt = now;
-    }
-
-    const saved = await this.repo.save(entity);
-
-    return this.toDomain(saved);
+    return entity ? this.toDomain(entity) : null;
   }
 
   async softDelete(id: string): Promise<void> {

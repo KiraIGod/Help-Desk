@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { Repository } from 'typeorm';
 
 import {
@@ -24,10 +24,10 @@ export class TypeOrmUserRepository implements UserRepository {
     const entity = this.repo.create({
       id: randomUUID(),
       email: input.email,
-      passwordHash: '',
+      passwordHash: randomBytes(32).toString('hex'),
       firstName: input.firstName,
       lastName: input.lastName,
-      status: 'active',
+      status: 'invited',
       roles: input.roleNames,
       departmentId: input.departmentId ?? null,
     });
