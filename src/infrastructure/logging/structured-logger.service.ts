@@ -1,0 +1,70 @@
+import { Injectable, LoggerService } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+
+import { EnvironmentVariables } from '../../config/environment';
+import { LogLevel, StructuredLogEntry } from './structured-log-entry.type';
+
+@Injectable()
+export class StructuredLoggerService implements LoggerService {
+  constructor(private readonly config: ConfigService<EnvironmentVariables, true>) {}
+
+  log(message: string, context?: string, metadata?: Record<string, unknown>): void {
+    this.write('log', message, context, undefined, metadata);
+  }
+
+  error(
+    message: string,
+    trace?: string,
+    context?: string,
+    metadata?: Record<string, unknown>,
+  ): void {
+    this.write('error', message, context, trace, metadata);
+  }
+
+  warn(message: string, context?: string, metadata?: Record<string, unknown>): void {
+    this.write('warn', message, context, undefined, metadata);
+  }
+
+  debug(message: string, context?: string, metadata?: Record<string, unknown>): void {
+    if (this.shouldWriteDebugLogs()) {
+      this.write('debug', message, context, undefined, metadata);
+    }
+  }
+
+  verbose(message: string, context?: string, metadata?: Record<string, unknown>): void {
+    if (this.shouldWriteDebugLogs()) {
+      this.write('verbose', message, context, undefined, metadata);
+    }
+  }
+
+  private write(
+    level: LogLevel,
+    message: string,
+    context?: string,
+    trace?: string,
+    metadata?: Record<string, unknown>,
+  ): void {
+    const entry: StructuredLogEntry = {
+      level,
+      message,
+      timestamp: new Date().toISOString(),
+      context,
+      trace,
+      metadata,
+    };
+    const output = JSON.stringify(entry);
+
+    if (level === 'error') {
+      process.stderr.write(`${output}\n`);
+      return;
+    }
+
+    process.stdout.write(`${output}\n`);
+  }
+
+  private shouldWriteDebugLogs(): boolean {
+    const logLevel = this.config.get('LOG_LEVEL', { infer: true });
+
+    return logLevel === 'debug' || logLevel === 'trace';
+  }
+}
