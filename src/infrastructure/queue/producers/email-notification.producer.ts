@@ -12,8 +12,9 @@ export class EmailNotificationProducer {
     private readonly queue: Queue<EmailNotificationJob>,
   ) {}
 
-  async enqueue(job: EmailNotificationJob): Promise<void> {
+  async enqueue(job: EmailNotificationJob, delayMs?: number): Promise<void> {
     await this.queue.add(job.type, job, {
+      delay: delayMs,
       attempts: 3,
       backoff: {
         type: 'exponential',

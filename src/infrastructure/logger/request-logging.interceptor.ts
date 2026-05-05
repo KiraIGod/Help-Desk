@@ -21,13 +21,13 @@ export class RequestLoggingInterceptor implements NestInterceptor {
     const request = http.getRequest<Request & { user?: AuthenticatedUser }>();
     const response = http.getResponse<Response>();
     const startedAt = Date.now();
-    const requestId = this.getRequestId(request);
+    const requestId = this.resolveRequestId(request);
 
     response.setHeader('x-request-id', requestId);
 
     return next.handle().pipe(
       finalize(() => {
-        this.logger.log('http_request_completed', 'RequestLoggingInterceptor', {
+        this.logger.log('http_request', 'RequestLoggingInterceptor', {
           requestId,
           method: request.method,
           path: request.originalUrl ?? request.url,
@@ -41,9 +41,9 @@ export class RequestLoggingInterceptor implements NestInterceptor {
     );
   }
 
-  private getRequestId(request: Request): string {
-    const requestId = request.get('x-request-id');
+  private resolveRequestId(request: Request): string {
+    const incoming = request.get('x-request-id');
 
-    return requestId?.trim() || randomUUID();
+    return incoming?.trim() || randomUUID();
   }
 }

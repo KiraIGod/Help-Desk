@@ -3,9 +3,10 @@ import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import { EnvironmentVariables } from '../../config/environment';
-import { EmailNotificationProcessor } from './processors/email-notification.processor';
 import { EmailNotificationProducer } from './producers/email-notification.producer';
+import { QueueService } from './queue.service';
 import { QUEUE_NAMES } from './queue.names';
+import { EmailWorker } from './workers/email.worker';
 
 @Global()
 @Module({
@@ -19,10 +20,9 @@ import { QUEUE_NAMES } from './queue.names';
         },
         defaultJobOptions: {
           attempts: 3,
-          backoff: {
-            type: 'exponential',
-            delay: 5000,
-          },
+          backoff: { type: 'exponential', delay: 5000 },
+          removeOnComplete: 100,
+          removeOnFail: 200,
         },
       }),
     }),
@@ -30,7 +30,7 @@ import { QUEUE_NAMES } from './queue.names';
       name: QUEUE_NAMES.emailNotifications,
     }),
   ],
-  providers: [EmailNotificationProducer, EmailNotificationProcessor],
-  exports: [BullModule, EmailNotificationProducer],
+  providers: [EmailNotificationProducer, EmailWorker, QueueService],
+  exports: [BullModule, QueueService, EmailNotificationProducer],
 })
-export class QueuesModule {}
+export class QueueModule {}

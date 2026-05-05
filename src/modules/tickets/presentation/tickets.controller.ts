@@ -21,6 +21,7 @@ import { JwtAuthGuard } from '../../auth/presentation/guards/jwt-auth.guard';
 import { AssignExecutorDto } from '../application/dto/assign-executor.dto';
 import { CreateTicketDto } from '../application/dto/create-ticket.dto';
 import { FilterTicketsDto } from '../application/dto/filter-tickets.dto';
+import { PaginatedTicketResponseDto } from '../application/dto/ticket-response.dto';
 import { UpdateTicketStatusDto } from '../application/dto/update-ticket-status.dto';
 import { UpdateTicketDto } from '../application/dto/update-ticket.dto';
 import { TicketsService } from '../application/services/tickets.service';
@@ -38,7 +39,7 @@ export class TicketsController {
 
   @Roles('admin', 'manager', 'employee')
   @Get()
-  findAll(@Query() filters: FilterTicketsDto) {
+  findAll(@Query() filters: FilterTicketsDto): Promise<PaginatedTicketResponseDto> {
     return this.ticketsService.findAll(filters);
   }
 

@@ -6,7 +6,7 @@ import helmet from 'helmet';
 
 import { AppModule } from './app.module';
 import { EnvironmentVariables } from './config/environment';
-import { StructuredLoggerService } from './infrastructure/logging/structured-logger.service';
+import { StructuredLoggerService } from './infrastructure/logger/structured-logger.service';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, {

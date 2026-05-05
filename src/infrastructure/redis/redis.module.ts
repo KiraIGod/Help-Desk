@@ -3,8 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import IORedis from 'ioredis';
 
 import { EnvironmentVariables } from '../../config/environment';
-import { CacheService } from './cache.service';
-import { REDIS_CLIENT } from './cache.constants';
+import { REDIS_CLIENT } from './redis.constants';
+import { RedisService } from './redis.service';
 
 @Global()
 @Module({
@@ -16,10 +16,11 @@ import { REDIS_CLIENT } from './cache.constants';
         new IORedis(config.get('REDIS_URL', { infer: true }), {
           maxRetriesPerRequest: 3,
           enableReadyCheck: true,
+          lazyConnect: false,
         }),
     },
-    CacheService,
+    RedisService,
   ],
-  exports: [CacheService, REDIS_CLIENT],
+  exports: [RedisService, REDIS_CLIENT],
 })
-export class CacheInfrastructureModule {}
+export class RedisModule {}

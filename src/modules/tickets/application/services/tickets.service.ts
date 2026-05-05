@@ -1,62 +1,94 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { createHash } from 'crypto';
 
-import { CacheService } from '../../../../infrastructure/cache/cache.service';
-import { EmailNotificationProducer } from '../../../../infrastructure/queues/producers/email-notification.producer';
-import { AuditService } from '../../../audit/application/services/audit.service';
+import { RedisService } from '../../../../infrastructure/redis/redis.service';
+import {
+  TICKET_ITEM_CACHE_TTL,
+  TICKET_LIST_CACHE_TTL,
+  TICKET_LIST_KEY_PREFIX,
+} from '../../../../infrastructure/redis/redis.constants';
 import { AuthenticatedUser } from '../../../auth/domain/types/authenticated-user.type';
 import { AssignExecutorDto } from '../dto/assign-executor.dto';
 import { CreateTicketDto } from '../dto/create-ticket.dto';
 import { FilterTicketsDto } from '../dto/filter-tickets.dto';
-import { TicketResponseDto, toTicketResponse } from '../dto/ticket-response.dto';
+import { PaginatedTicketResponseDto, TicketResponseDto, toTicketResponse } from '../dto/ticket-response.dto';
 import { UpdateTicketStatusDto } from '../dto/update-ticket-status.dto';
 import { UpdateTicketDto } from '../dto/update-ticket.dto';
 import { TicketRepository } from '../ports/ticket-repository.port';
 import { TICKET_REPOSITORY } from '../ports/ticket-repository.token';
+import { AssignTicketUseCase } from '../use-cases/assign-ticket.use-case';
+import { ChangeTicketStatusUseCase } from '../use-cases/change-ticket-status.use-case';
+import { CreateTicketUseCase } from '../use-cases/create-ticket.use-case';
+import { DeleteTicketUseCase } from '../use-cases/delete-ticket.use-case';
+import { ticketCacheKey } from '../use-cases/ticket-cache.util';
+import { UpdateTicketUseCase } from '../use-cases/update-ticket.use-case';
 
+/**
+ * TicketsService is a thin orchestration facade.
+ *
+ * Write operations are delegated to dedicated use-case classes that own
+ * transaction logic, cache invalidation, and async notifications.
+ *
+ * Read operations live here because they are pure queries with no side effects.
+ */
 @Injectable()
 export class TicketsService {
   constructor(
     @Inject(TICKET_REPOSITORY)
     private readonly tickets: TicketRepository,
-    private readonly cache: CacheService,
-    private readonly emailNotifications: EmailNotificationProducer,
-    private readonly audit: AuditService,
+    private readonly redis: RedisService,
+    private readonly createTicketUseCase: CreateTicketUseCase,
+    private readonly assignTicketUseCase: AssignTicketUseCase,
+    private readonly changeTicketStatusUseCase: ChangeTicketStatusUseCase,
+    private readonly updateTicketUseCase: UpdateTicketUseCase,
+    private readonly deleteTicketUseCase: DeleteTicketUseCase,
   ) {}
 
-  async create(dto: CreateTicketDto, requester: AuthenticatedUser): Promise<TicketResponseDto> {
-    const ticket = await this.tickets.create({
-      title: dto.title.trim(),
-      description: dto.description.trim(),
-      requesterId: requester.id,
-      priority: dto.priority ?? 'medium',
-      deadlineAt: dto.deadlineAt ? new Date(dto.deadlineAt) : null,
-    });
-    const response = toTicketResponse(ticket);
+  // ─── Commands ────────────────────────────────────────────────────────────
 
-    await this.cache.set(this.getTicketCacheKey(ticket.id), response);
-    await this.emailNotifications.enqueue({
-      type: 'ticket_created',
-      recipientUserId: requester.id,
-      ticketId: ticket.id,
-      subject: `Ticket created: ${ticket.title}`,
-      body: ticket.description,
-    });
-    await this.audit.record({
-      actorId: requester.id,
-      action: 'ticket.created',
-      entityType: 'ticket',
-      entityId: ticket.id,
-      metadata: {
-        priority: ticket.priority,
-        deadlineAt: ticket.deadlineAt,
-      },
-    });
-
-    return response;
+  async create(dto: CreateTicketDto, actor: AuthenticatedUser): Promise<TicketResponseDto> {
+    return this.createTicketUseCase.execute(dto, actor);
   }
 
-  async findAll(filters: FilterTicketsDto): Promise<TicketResponseDto[]> {
-    const tickets = await this.tickets.findAll({
+  async update(
+    id: string,
+    dto: UpdateTicketDto,
+    actor: AuthenticatedUser,
+  ): Promise<TicketResponseDto> {
+    return this.updateTicketUseCase.execute(id, dto, actor);
+  }
+
+  async assignExecutor(
+    id: string,
+    dto: AssignExecutorDto,
+    actor: AuthenticatedUser,
+  ): Promise<TicketResponseDto> {
+    return this.assignTicketUseCase.execute(id, dto, actor);
+  }
+
+  async updateStatus(
+    id: string,
+    dto: UpdateTicketStatusDto,
+    actor: AuthenticatedUser,
+  ): Promise<TicketResponseDto> {
+    return this.changeTicketStatusUseCase.execute(id, dto, actor);
+  }
+
+  async softDelete(id: string, actor: AuthenticatedUser): Promise<void> {
+    return this.deleteTicketUseCase.execute(id, actor);
+  }
+
+  // ─── Queries ─────────────────────────────────────────────────────────────
+
+  async findAll(filters: FilterTicketsDto): Promise<PaginatedTicketResponseDto> {
+    const cacheKey = this.buildListCacheKey(filters);
+    const cached = await this.redis.get<PaginatedTicketResponseDto>(cacheKey);
+
+    if (cached) {
+      return cached;
+    }
+
+    const result = await this.tickets.findAll({
       status: filters.status,
       priority: filters.priority,
       requesterId: filters.requesterId,
@@ -64,17 +96,31 @@ export class TicketsService {
       deadlineFrom: filters.deadlineFrom ? new Date(filters.deadlineFrom) : undefined,
       deadlineTo: filters.deadlineTo ? new Date(filters.deadlineTo) : undefined,
       search: filters.search?.trim(),
+      page: filters.page,
+      limit: filters.limit,
     });
 
-    return tickets.map(toTicketResponse);
+    const response: PaginatedTicketResponseDto = {
+      data: result.data.map(toTicketResponse),
+      meta: {
+        page: result.page,
+        limit: result.limit,
+        total: result.total,
+        totalPages: Math.ceil(result.total / result.limit),
+      },
+    };
+
+    await this.redis.set(cacheKey, response, TICKET_LIST_CACHE_TTL);
+
+    return response;
   }
 
   async findById(id: string): Promise<TicketResponseDto> {
-    const cacheKey = this.getTicketCacheKey(id);
-    const cachedTicket = await this.cache.get<TicketResponseDto>(cacheKey);
+    const cacheKey = ticketCacheKey(id);
+    const cached = await this.redis.get<TicketResponseDto>(cacheKey);
 
-    if (cachedTicket) {
-      return cachedTicket;
+    if (cached) {
+      return cached;
     }
 
     const ticket = await this.tickets.findById(id);
@@ -85,124 +131,37 @@ export class TicketsService {
 
     const response = toTicketResponse(ticket);
 
-    await this.cache.set(cacheKey, response);
+    await this.redis.set(cacheKey, response, TICKET_ITEM_CACHE_TTL);
 
     return response;
   }
 
-  async update(
-    id: string,
-    dto: UpdateTicketDto,
-    actor: AuthenticatedUser,
-  ): Promise<TicketResponseDto> {
-    const ticket = await this.tickets.update(id, {
-      title: dto.title?.trim(),
-      description: dto.description?.trim(),
-      priority: dto.priority,
-      deadlineAt: dto.deadlineAt ? new Date(dto.deadlineAt) : undefined,
-    });
+  // ─── Helpers ─────────────────────────────────────────────────────────────
 
-    if (!ticket) {
-      throw new NotFoundException('Ticket not found');
-    }
+  /**
+   * Builds a deterministic Redis key from filter parameters.
+   * Uses a short SHA-256 hash to keep keys concise and collision-free.
+   *
+   * Pattern: tickets:list:{sha256(sorted-params)}
+   */
+  private buildListCacheKey(filters: FilterTicketsDto): string {
+    const params = {
+      p: filters.page ?? 1,
+      l: filters.limit ?? 20,
+      s: filters.status ?? '',
+      pr: filters.priority ?? '',
+      rId: filters.requesterId ?? '',
+      eId: filters.executorId ?? '',
+      q: filters.search ?? '',
+      df: filters.deadlineFrom ?? '',
+      dt: filters.deadlineTo ?? '',
+    };
 
-    const response = toTicketResponse(ticket);
+    const hash = createHash('sha256')
+      .update(JSON.stringify(params))
+      .digest('hex')
+      .slice(0, 16);
 
-    await this.cache.set(this.getTicketCacheKey(id), response);
-    await this.audit.record({
-      actorId: actor.id,
-      action: 'ticket.updated',
-      entityType: 'ticket',
-      entityId: ticket.id,
-      metadata: {
-        fields: Object.keys(dto),
-      },
-    });
-
-    return response;
-  }
-
-  async assignExecutor(
-    id: string,
-    dto: AssignExecutorDto,
-    actor: AuthenticatedUser,
-  ): Promise<TicketResponseDto> {
-    const ticket = await this.tickets.assignExecutor(id, dto.executorId);
-
-    if (!ticket) {
-      throw new NotFoundException('Ticket not found');
-    }
-
-    const response = toTicketResponse(ticket);
-
-    await this.cache.set(this.getTicketCacheKey(id), response);
-    await this.emailNotifications.enqueue({
-      type: 'ticket_assigned',
-      recipientUserId: dto.executorId,
-      ticketId: ticket.id,
-      subject: `Ticket assigned: ${ticket.title}`,
-      body: ticket.description,
-    });
-    await this.audit.record({
-      actorId: actor.id,
-      action: 'ticket.assigned',
-      entityType: 'ticket',
-      entityId: ticket.id,
-      metadata: {
-        executorId: dto.executorId,
-      },
-    });
-
-    return response;
-  }
-
-  async updateStatus(
-    id: string,
-    dto: UpdateTicketStatusDto,
-    actor: AuthenticatedUser,
-  ): Promise<TicketResponseDto> {
-    const ticket = await this.tickets.updateStatus(id, dto.status);
-
-    if (!ticket) {
-      throw new NotFoundException('Ticket not found');
-    }
-
-    const response = toTicketResponse(ticket);
-
-    await this.cache.set(this.getTicketCacheKey(id), response);
-    await this.emailNotifications.enqueue({
-      type: 'ticket_status_updated',
-      recipientUserId: ticket.requesterId,
-      ticketId: ticket.id,
-      subject: `Ticket status updated: ${ticket.title}`,
-      body: `Ticket status changed to ${ticket.status}.`,
-    });
-    await this.audit.record({
-      actorId: actor.id,
-      action: 'ticket.status_updated',
-      entityType: 'ticket',
-      entityId: ticket.id,
-      metadata: {
-        status: ticket.status,
-      },
-    });
-
-    return response;
-  }
-
-  async softDelete(id: string, actor: AuthenticatedUser): Promise<void> {
-    await this.findById(id);
-    await this.tickets.softDelete(id);
-    await this.cache.del(this.getTicketCacheKey(id));
-    await this.audit.record({
-      actorId: actor.id,
-      action: 'ticket.deleted',
-      entityType: 'ticket',
-      entityId: id,
-    });
-  }
-
-  private getTicketCacheKey(id: string): string {
-    return `tickets:${id}`;
+    return `${TICKET_LIST_KEY_PREFIX}:${hash}`;
   }
 }

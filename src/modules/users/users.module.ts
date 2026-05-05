@@ -1,21 +1,24 @@
 import { Module } from '@nestjs/common';
+import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { UsersService } from './application/services/users.service';
 import { USER_REPOSITORY } from './application/ports/user-repository.token';
-import { InMemoryUserRepository } from './infrastructure/persistence/in-memory-user.repository';
+import { UsersService } from './application/services/users.service';
+import { UserOrmEntity } from './infrastructure/persistence/typeorm/user.orm-entity';
+import { TypeOrmUserRepository } from './infrastructure/persistence/typeorm-user.repository';
 import { UsersController } from './presentation/users.controller';
 
 @Module({
+  imports: [TypeOrmModule.forFeature([UserOrmEntity])],
   controllers: [UsersController],
   providers: [
     UsersService,
     RolesGuard,
     {
       provide: USER_REPOSITORY,
-      useClass: InMemoryUserRepository,
+      useClass: TypeOrmUserRepository,
     },
   ],
-  exports: [UsersService, RolesGuard],
+  exports: [UsersService, RolesGuard, TypeOrmModule],
 })
 export class UsersModule {}

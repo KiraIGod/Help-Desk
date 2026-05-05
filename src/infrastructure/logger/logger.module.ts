@@ -7,4 +7,4 @@ import { StructuredLoggerService } from './structured-logger.service';
   providers: [StructuredLoggerService],
   exports: [StructuredLoggerService],
 })
-export class LoggingModule {}
+export class LoggerModule {}
