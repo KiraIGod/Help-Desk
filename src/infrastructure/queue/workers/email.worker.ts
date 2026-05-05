@@ -49,9 +49,6 @@ export class EmailWorker extends WorkerHost {
     });
   }
 
-  /**
-   * Replace with your transport of choice: SendGrid, AWS SES, Nodemailer, etc.
-   */
   private async deliver(data: EmailNotificationJob): Promise<void> {
     this.logger.debug('email_deliver_stub', EmailWorker.name, {
       subject: data.subject,

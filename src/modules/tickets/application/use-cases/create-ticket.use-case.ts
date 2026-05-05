@@ -1,91 +1,103 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { randomUUID } from 'crypto';
-import { DataSource } from 'typeorm';
 
+import { TRANSACTION_SERVICE, TransactionService } from '../../../../common/transaction/transaction.service';
 import { AuditAction } from '../../../audit/domain/enums/audit-action.enum';
-import { AuditLogOrmEntity } from '../../../audit/infrastructure/persistence/typeorm/audit-log.orm-entity';
 import { AuthenticatedUser } from '../../../auth/domain/types/authenticated-user.type';
 import { QueueService } from '../../../../infrastructure/queue/queue.service';
 import { RedisService } from '../../../../infrastructure/redis/redis.service';
 import { TICKET_LIST_KEY_PREFIX } from '../../../../infrastructure/redis/redis.constants';
-import { TicketOrmEntity } from '../../infrastructure/persistence/typeorm/ticket.orm-entity';
+import { StructuredLoggerService } from '../../../../infrastructure/logger/structured-logger.service';
+import { Ticket } from '../../domain/entities/ticket.entity';
 import { CreateTicketDto } from '../dto/create-ticket.dto';
 import { TicketResponseDto, toTicketResponse } from '../dto/ticket-response.dto';
-import { TicketRepository } from '../ports/ticket-repository.port';
-import { TICKET_REPOSITORY } from '../ports/ticket-repository.token';
 import { ticketCacheKey } from './ticket-cache.util';
 
 @Injectable()
 export class CreateTicketUseCase {
   constructor(
-    @Inject(TICKET_REPOSITORY)
-    private readonly tickets: TicketRepository,
-    private readonly dataSource: DataSource,
+    @Inject(TRANSACTION_SERVICE)
+    private readonly tx: TransactionService,
     private readonly queue: QueueService,
     private readonly redis: RedisService,
+    private readonly logger: StructuredLoggerService,
   ) {}
 
   async execute(dto: CreateTicketDto, actor: AuthenticatedUser): Promise<TicketResponseDto> {
     const ticketId = randomUUID();
-    const now = new Date();
     const priority = dto.priority ?? 'medium';
 
-    /**
-     * Unit-of-work:
-     *  [1] INSERT ticket row
-     *  [2] INSERT audit_log row
-     * If either fails, the whole transaction rolls back atomically.
-     */
-    await this.dataSource.transaction(async (manager) => {
-      await manager.getRepository(TicketOrmEntity).save(
-        manager.getRepository(TicketOrmEntity).create({
-          id: ticketId,
-          title: dto.title.trim(),
-          description: dto.description.trim(),
-          requesterId: actor.id,
-          executorId: null,
-          status: 'open',
-          priority,
-          deadlineAt: dto.deadlineAt ? new Date(dto.deadlineAt) : null,
-          resolvedAt: null,
-          closedAt: null,
-        }),
-      );
+    const ticket = await this.tx.execute(async (ctx) => {
+      const newTicket = Ticket.create({
+        id: ticketId,
+        title: dto.title.trim(),
+        description: dto.description.trim(),
+        requesterId: actor.id,
+        priority,
+        deadlineAt: dto.deadlineAt ? new Date(dto.deadlineAt) : null,
+      });
 
-      await manager.getRepository(AuditLogOrmEntity).save(
-        manager.getRepository(AuditLogOrmEntity).create({
-          id: randomUUID(),
-          actorId: actor.id,
-          action: AuditAction.CREATE_TICKET,
-          entityType: 'ticket',
-          entityId: ticketId,
-          metadata: { priority, deadlineAt: dto.deadlineAt ?? null },
-          createdAt: now,
-        }),
-      );
+      const saved = await ctx.tickets.save(newTicket);
+
+      await ctx.auditLogs.save({
+        actorId: actor.id,
+        action: AuditAction.CREATE_TICKET,
+        entityType: 'ticket',
+        entityId: ticketId,
+        metadata: { priority, deadlineAt: dto.deadlineAt ?? null },
+      });
+
+      return saved;
     });
 
-    const ticket = await this.tickets.findById(ticketId);
-    const response = toTicketResponse(ticket!);
+    const response = toTicketResponse(ticket);
 
-    /**
-     * Post-commit side effects (non-transactional, best-effort):
-     *  [1] Warm the item cache
-     *  [2] Invalidate all list caches so the next GET /tickets reflects the new item
-     *  [3] Dispatch async email notification via BullMQ
-     */
-    await Promise.all([
-      this.redis.set(ticketCacheKey(ticketId), response),
-      this.redis.invalidateByPattern(`${TICKET_LIST_KEY_PREFIX}:*`),
-      this.queue.sendEmail({
-        type: 'ticket_created',
-        recipientUserId: actor.id,
-        ticketId,
-        subject: `Ticket created: ${ticket!.title}`,
-        body: ticket!.description,
-      }),
+    await Promise.allSettled([
+      this.safeCacheSet(ticketCacheKey(ticketId), response),
+      this.safeCacheInvalidate(`${TICKET_LIST_KEY_PREFIX}:*`),
+      this.safeQueueSend(actor.id, ticketId, ticket),
     ]);
 
+    this.safeLog(ticketId, actor.id, priority);
+
     return response;
+  }
+
+  private async safeCacheSet(key: string, value: TicketResponseDto): Promise<void> {
+    try {
+      await this.redis.set(key, value);
+    } catch (err) {
+      this.logger.warn('cache_set_failed', 'CreateTicketUseCase', { key, error: (err as Error)?.message });
+    }
+  }
+
+  private async safeCacheInvalidate(pattern: string): Promise<void> {
+    try {
+      await this.redis.invalidateByPattern(pattern);
+    } catch (err) {
+      this.logger.warn('cache_invalidate_failed', 'CreateTicketUseCase', { pattern, error: (err as Error)?.message });
+    }
+  }
+
+  private async safeQueueSend(actorId: string, ticketId: string, ticket: Ticket): Promise<void> {
+    try {
+      await this.queue.sendEmail({
+        type: 'ticket_created',
+        recipientUserId: actorId,
+        ticketId,
+        subject: `Ticket created: ${ticket.title}`,
+        body: ticket.description,
+      });
+    } catch (err) {
+      this.logger.error('email_queue_failed', undefined, 'CreateTicketUseCase', { ticketId, error: (err as Error)?.message });
+    }
+  }
+
+  private safeLog(ticketId: string, actorId: string, priority: string): void {
+    try {
+      this.logger.log('ticket_created', 'CreateTicketUseCase', { ticketId, actorId, priority });
+    } catch {
+      // logger failures must never propagate
+    }
   }
 }

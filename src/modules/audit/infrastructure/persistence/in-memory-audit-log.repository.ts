@@ -9,8 +9,7 @@ import { AuditLog } from '../../domain/entities/audit-log.entity';
 export class InMemoryAuditLogRepository implements AuditLogRepository {
   private readonly logs: AuditLog[] = [];
 
-  // manager parameter is ignored in the in-memory implementation (no real transactions)
-  async create(input: CreateAuditLogDto): Promise<AuditLog> {
+  async save(input: CreateAuditLogDto): Promise<AuditLog> {
     const auditLog = new AuditLog(
       randomUUID(),
       input.actorId ?? null,

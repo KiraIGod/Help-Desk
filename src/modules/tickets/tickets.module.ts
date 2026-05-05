@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { RolesGuard } from '../../common/guards/roles.guard';
+import { TRANSACTION_SERVICE } from '../../common/transaction/transaction.service';
+import { TypeOrmTransactionService } from '../../infrastructure/database/typeorm-transaction.service';
 import { AuditModule } from '../audit/audit.module';
 import { TICKET_REPOSITORY } from './application/ports/ticket-repository.token';
 import { TicketsService } from './application/services/tickets.service';
@@ -23,15 +25,14 @@ import { TicketsController } from './presentation/tickets.controller';
   providers: [
     TicketsService,
     RolesGuard,
+    TypeOrmTransactionService,
+    { provide: TRANSACTION_SERVICE, useClass: TypeOrmTransactionService },
     CreateTicketUseCase,
     AssignTicketUseCase,
     ChangeTicketStatusUseCase,
     UpdateTicketUseCase,
     DeleteTicketUseCase,
-    {
-      provide: TICKET_REPOSITORY,
-      useClass: TypeOrmTicketRepository,
-    },
+    { provide: TICKET_REPOSITORY, useClass: TypeOrmTicketRepository },
   ],
   exports: [TicketsService],
 })

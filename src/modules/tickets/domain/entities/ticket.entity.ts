@@ -18,6 +18,33 @@ export class Ticket {
     public readonly deletedAt: Date | null = null,
   ) {}
 
+  static create(params: {
+    id: string;
+    title: string;
+    description: string;
+    requesterId: string;
+    priority: TicketPriority;
+    deadlineAt: Date | null;
+  }): Ticket {
+    const now = new Date();
+
+    return new Ticket(
+      params.id,
+      params.title,
+      params.description,
+      params.requesterId,
+      null,
+      'open',
+      params.priority,
+      params.deadlineAt,
+      now,
+      now,
+      null,
+      null,
+      null,
+    );
+  }
+
   assignExecutor(executorId: string): Ticket {
     return new Ticket(
       this.id,

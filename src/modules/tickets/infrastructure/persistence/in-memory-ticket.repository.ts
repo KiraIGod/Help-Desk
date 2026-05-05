@@ -1,35 +1,17 @@
 import { Injectable } from '@nestjs/common';
-import { randomUUID } from 'crypto';
 
 import {
-  CreateTicketInput,
   PaginatedTickets,
   TicketFilters,
   TicketRepository,
-  UpdateTicketInput,
 } from '../../application/ports/ticket-repository.port';
 import { Ticket } from '../../domain/entities/ticket.entity';
-import { TicketStatus } from '../../domain/value-objects/ticket-status';
 
 @Injectable()
 export class InMemoryTicketRepository implements TicketRepository {
   private readonly tickets = new Map<string, Ticket>();
 
-  async create(input: CreateTicketInput): Promise<Ticket> {
-    const now = new Date();
-    const ticket = new Ticket(
-      randomUUID(),
-      input.title,
-      input.description,
-      input.requesterId,
-      null,
-      'open',
-      input.priority,
-      input.deadlineAt ?? null,
-      now,
-      now,
-    );
-
+  async save(ticket: Ticket): Promise<Ticket> {
     this.tickets.set(ticket.id, ticket);
 
     return ticket;
@@ -59,46 +41,8 @@ export class InMemoryTicketRepository implements TicketRepository {
     return ticket;
   }
 
-  async update(id: string, input: UpdateTicketInput): Promise<Ticket | null> {
-    const ticket = await this.findById(id);
-
-    if (!ticket) {
-      return null;
-    }
-
-    const updatedTicket = ticket.updateDetails(input);
-
-    this.tickets.set(id, updatedTicket);
-
-    return updatedTicket;
-  }
-
-  async assignExecutor(id: string, executorId: string): Promise<Ticket | null> {
-    const ticket = await this.findById(id);
-
-    if (!ticket) {
-      return null;
-    }
-
-    const updatedTicket = ticket.assignExecutor(executorId);
-
-    this.tickets.set(id, updatedTicket);
-
-    return updatedTicket;
-  }
-
-  async updateStatus(id: string, status: TicketStatus): Promise<Ticket | null> {
-    const ticket = await this.findById(id);
-
-    if (!ticket) {
-      return null;
-    }
-
-    const updatedTicket = ticket.updateStatus(status);
-
-    this.tickets.set(id, updatedTicket);
-
-    return updatedTicket;
+  async findByIdForUpdate(id: string): Promise<Ticket | null> {
+    return this.findById(id);
   }
 
   async softDelete(id: string): Promise<void> {

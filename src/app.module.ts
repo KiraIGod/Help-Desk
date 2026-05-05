@@ -12,6 +12,7 @@ import { RedisThrottlerStorage } from './infrastructure/redis/redis-throttler.st
 import { RedisModule } from './infrastructure/redis/redis.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { HealthModule } from './modules/health/health.module';
 import { TicketsModule } from './modules/tickets/tickets.module';
 import { UsersModule } from './modules/users/users.module';
 
@@ -23,13 +24,6 @@ import { UsersModule } from './modules/users/users.module';
     RedisModule,
     QueueModule,
 
-    /**
-     * Rate limiting – Redis-backed, shared across all instances.
-     *
-     * Named throttlers (applied via @Throttle decorator):
-     *   - default: 100 req / 60 s per IP  (all routes)
-     *   - auth:    10 req / 60 s per IP   (login, register)
-     */
     ThrottlerModule.forRootAsync({
       inject: [RedisThrottlerStorage],
       useFactory: (storage: RedisThrottlerStorage) => ({
@@ -41,6 +35,7 @@ import { UsersModule } from './modules/users/users.module';
       }),
     }),
 
+    HealthModule,
     AuditModule,
     AuthModule,
     UsersModule,
@@ -48,18 +43,9 @@ import { UsersModule } from './modules/users/users.module';
   ],
   providers: [
     RedisThrottlerStorage,
-    {
-      provide: APP_INTERCEPTOR,
-      useClass: RequestLoggingInterceptor,
-    },
-    {
-      provide: APP_FILTER,
-      useClass: AllExceptionsFilter,
-    },
-    {
-      provide: APP_GUARD,
-      useClass: ThrottlerGuard,
-    },
+    { provide: APP_INTERCEPTOR, useClass: RequestLoggingInterceptor },
+    { provide: APP_FILTER, useClass: AllExceptionsFilter },
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
 export class AppModule {}
